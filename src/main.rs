@@ -122,7 +122,7 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
+            Constraint::Length(4),  // Header
             Constraint::Length(3),  // Tabs
             Constraint::Min(0),     // Conteúdo
             Constraint::Length(1),  // Footer
@@ -132,15 +132,29 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
     // Header
     if let Some(m) = &app.metrics {
         let uptime = formatar_uptime(m.uptime_secs);
-        let header_text = vec![Line::from(vec![
-            Span::styled(" 🛡️  Syswatch-TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw("│ "),
-            Span::styled(&m.hostname, Style::default().fg(Color::Yellow)),
-            Span::raw(" │ "),
-            Span::styled(&m.os_nome, Style::default().fg(Color::White)),
-            Span::raw(" │ uptime: "),
-            Span::styled(uptime, Style::default().fg(Color::Green)),
-        ])];
+        let pct_ram = if m.memoria.total > 0 {
+            m.memoria.usado as f32 / m.memoria.total as f32 * 100.0
+        } else { 0.0 };
+        let cor_ram = if pct_ram >= 80.0 { Color::Rgb(220, 50, 50) }
+            else if pct_ram >= 50.0 { Color::Rgb(220, 180, 0) }
+            else { Color::Rgb(0, 200, 80) };
+        let header_text = vec![
+            Line::from(vec![
+                Span::styled(" 🛡️  Syswatch-TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::raw("│ "),
+                Span::styled(&m.hostname, Style::default().fg(Color::Yellow)),
+                Span::raw(" │ "),
+                Span::styled(&m.os_nome, Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::raw(" ⏱ uptime: "),
+                Span::styled(uptime, Style::default().fg(Color::Green)),
+                Span::raw(" │ 🖥 CPU: "),
+                Span::styled(format!("{:.1}%", m.cpu.usage_global), Style::default().fg(crate::ui::cpu::cor_por_uso(m.cpu.usage_global))),
+                Span::raw(" │ 🧠 RAM: "),
+                Span::styled(format!("{:.0}%", pct_ram), Style::default().fg(cor_ram)),
+            ]),
+        ];
         let header = Paragraph::new(header_text)
             .block(Block::default().borders(Borders::ALL));
         f.render_widget(header, chunks[0]);
