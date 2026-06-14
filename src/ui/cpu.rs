@@ -1,48 +1,20 @@
 use ratatui::{
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Bar, BarChart, BarGroup, Block, Borders, Gauge, Paragraph},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style},
+    symbols,
+    widgets::{Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, Gauge, GraphType},
     Frame,
 };
 use crate::metrics::collector::CpuMetrics;
 
 pub fn render(f: &mut Frame, area: Rect, cpu: &CpuMetrics, historico: &[f32]) {
-    let cor = cor_por_uso(cpu.usage_global);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    let titulo = format!(
-        " 🖥️  CPU — {} | {:.0} MHz | {:.1}% ",
-        cpu.nome, cpu.frequencia_mhz, cpu.usage_global
-    );
-
-    let bloco = Block::default()
-        .title(titulo)
-        .borders(Borders::ALL)
-        .style(Style::default().fg(cor));
-
-    // Gráfico de barras por core
-    let barras: Vec<Bar> = cpu.usage_por_core
-        .iter()
-        .enumerate()
-        .map(|(i, uso)| {
-            Bar::default()
-                .value(*uso as u64)
-                .label(Line::from(format!("C{}", i)))
-                .style(Style::default().fg(cor_por_uso(*uso)))
-                .value_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
-        })
-        .collect();
-
-    let grupo = BarGroup::default().bars(&barras);
-
-    let chart = BarChart::default()
-        .block(bloco)
-        .max(100)
-        .bar_width(3)
-        .bar_gap(1)
-        .data(grupo);
-
-    f.render_widget(chart, area);
+    render_barchart(f, chunks[0], cpu);
+    render_historico(f, chunks[1], historico);
 }
 
 pub fn render_gauge(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
@@ -55,7 +27,72 @@ pub fn render_gauge(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
     f.render_widget(gauge, area);
 }
 
-fn cor_por_uso(uso: f32) -> Color {
+fn render_barchart(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
+    let titulo = format!(
+        " 🖥️  CPU — {} | {} MHz | {:.1}% ",
+        cpu.nome, cpu.frequencia_mhz, cpu.usage_global
+    );
+
+    let barras: Vec<Bar> = cpu.usage_por_core
+        .iter()
+        .enumerate()
+        .map(|(i, uso)| {
+            Bar::default()
+                .value(*uso as u64)
+                .label(ratatui::text::Line::from(format!("C{}", i)))
+                .style(Style::default().fg(cor_por_uso(*uso)))
+                .value_style(Style::default().fg(Color::White))
+        })
+        .collect();
+
+    let grupo = BarGroup::default().bars(&barras);
+    let chart = BarChart::default()
+        .block(Block::default().title(titulo).borders(Borders::ALL))
+        .max(100)
+        .bar_width(3)
+        .bar_gap(1)
+        .data(grupo);
+
+    f.render_widget(chart, area);
+}
+
+fn render_historico(f: &mut Frame, area: Rect, historico: &[f32]) {
+    if historico.is_empty() {
+        return;
+    }
+
+    let dados: Vec<(f64, f64)> = historico
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (i as f64, *v as f64))
+        .collect();
+
+    let max_x = dados.len().saturating_sub(1) as f64;
+    let cor = cor_por_uso(*historico.last().unwrap_or(&0.0));
+
+    let dataset = Dataset::default()
+        .name("CPU%")
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(cor))
+        .data(&dados);
+
+    let chart = Chart::new(vec![dataset])
+        .block(Block::default()
+            .title(" 📈 Histórico CPU (60s) ")
+            .borders(Borders::ALL))
+        .x_axis(Axis::default()
+            .bounds([0.0, max_x.max(60.0)])
+            .style(Style::default().fg(Color::DarkGray)))
+        .y_axis(Axis::default()
+            .bounds([0.0, 100.0])
+            .labels(vec![ratatui::text::Span::raw("0%"), ratatui::text::Span::raw("50%"), ratatui::text::Span::raw("100%")])
+            .style(Style::default().fg(Color::DarkGray)));
+
+    f.render_widget(chart, area);
+}
+
+pub fn cor_por_uso(uso: f32) -> Color {
     if uso >= 80.0 { Color::Rgb(220, 50, 50) }
     else if uso >= 50.0 { Color::Rgb(220, 180, 0) }
     else { Color::Rgb(0, 200, 80) }
