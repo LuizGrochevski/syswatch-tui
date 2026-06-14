@@ -95,7 +95,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         return Ok(());
                     }
                     (KeyCode::Tab, _) | (KeyCode::Right, _) => {
-                        app.tab_ativa = (app.tab_ativa + 1) % 4;
+                        app.tab_ativa = (app.tab_ativa + 1) % 5;
                     }
                     (KeyCode::BackTab, _) | (KeyCode::Left, _) => {
                         app.tab_ativa = app.tab_ativa.saturating_sub(1);
@@ -104,6 +104,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                     (KeyCode::Char('2'), _) => app.tab_ativa = 1,
                     (KeyCode::Char('3'), _) => app.tab_ativa = 2,
                     (KeyCode::Char('4'), _) => app.tab_ativa = 3,
+                    (KeyCode::Char('5'), _) => app.tab_ativa = 4,
                     _ => {}
                 }
             }
@@ -161,7 +162,7 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
     }
 
     // Tabs
-    let tabs_labels = vec!["[1] CPU", "[2] Memória", "[3] Processos", "[4] Rede"];
+    let tabs_labels = vec!["[1] CPU", "[2] Memória", "[3] Processos", "[4] Rede", "[5] Sistema"];
     let tabs_text = tabs_labels.iter().enumerate().map(|(i, label)| {
         if i == app.tab_ativa {
             Span::styled(*label, Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
@@ -188,6 +189,7 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
             1 => ui::memory::render(f, chunks[2], &m.memoria),
             2 => ui::processes::render(f, chunks[2], &m.processos),
             3 => ui::network::render(f, chunks[2], &m.redes),
+            4 => ui::sysinfo::render(f, chunks[2], &m),
             _ => {}
         }
     }
@@ -198,7 +200,7 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
         Span::raw(": sair  "),
         Span::styled("Tab/←→", Style::default().fg(Color::Yellow)),
         Span::raw(": navegar  "),
-        Span::styled("1-4", Style::default().fg(Color::Yellow)),
+        Span::styled("1-5", Style::default().fg(Color::Yellow)),
         Span::raw(": painéis  "),
         Span::styled("Ctrl+C", Style::default().fg(Color::Yellow)),
         Span::raw(": forçar saída"),
