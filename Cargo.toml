@@ -1,0 +1,21 @@
+[package]
+name = "syswatch-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Luiz Grochevski"]
+description = "Dashboard TUI de monitoramento de sistema em tempo real"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+sysinfo = "0.33"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+strip = true
+
+[[bin]]
+name = "test_sysinfo"
+path = "src/test_sysinfo.rs"
