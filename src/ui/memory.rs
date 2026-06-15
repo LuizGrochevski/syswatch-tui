@@ -9,7 +9,12 @@ use crate::metrics::collector::{MemoryMetrics, formatar_bytes};
 pub fn render(f: &mut Frame, area: Rect, mem: &MemoryMetrics) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Length(3),  // RAM gauge
+            Constraint::Length(1),  // espaço
+            Constraint::Length(3),  // SWAP gauge
+            Constraint::Min(0),     // área vazia restante
+        ])
         .split(area);
 
     // RAM
@@ -35,6 +40,12 @@ pub fn render(f: &mut Frame, area: Rect, mem: &MemoryMetrics) {
     } else { 0 };
 
     let cor_swap = cor_por_pct(pct_swap);
+    let label_swap = if mem.swap_total == 0 {
+        "sem swap".to_string()
+    } else {
+        format!("{}%", pct_swap)
+    };
+
     let swap_gauge = Gauge::default()
         .block(Block::default()
             .title(format!(" 💾 SWAP — {} / {} ",
@@ -43,8 +54,8 @@ pub fn render(f: &mut Frame, area: Rect, mem: &MemoryMetrics) {
             .borders(Borders::ALL))
         .gauge_style(Style::default().fg(cor_swap).bg(Color::Black))
         .percent(pct_swap)
-        .label(format!("{}%", pct_swap));
-    f.render_widget(swap_gauge, chunks[1]);
+        .label(label_swap);
+    f.render_widget(swap_gauge, chunks[2]);
 }
 
 fn cor_por_pct(pct: u16) -> Color {

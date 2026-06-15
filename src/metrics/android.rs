@@ -98,7 +98,7 @@ pub fn ler_cpus() -> CpuAndroid {
             .unwrap_or(0);
 
         let uso = if max_freq_khz > 0 && online {
-            (freq_khz as f32 / max_freq_khz as f32) * 100.0
+            (freq_khz as f32 / max_freq_khz as f32 * 100.0).clamp(0.0, 100.0)
         } else { 0.0 };
 
         cores.push(CoreInfo {

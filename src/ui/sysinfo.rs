@@ -7,35 +7,44 @@ use ratatui::{
 };
 use crate::metrics::collector::{SystemMetrics, formatar_bytes, formatar_uptime};
 
-pub fn ler_temperatura() -> Option<f32> {
-    for i in 0..10 {
-        let path = format!("/sys/class/thermal/thermal_zone{}/temp", i);
-        if let Ok(conteudo) = std::fs::read_to_string(&path) {
-            if let Ok(temp) = conteudo.trim().parse::<i32>() {
-                let celsius = temp as f32 / 1000.0;
-                if celsius > 0.0 && celsius < 150.0 {
-                    return Some(celsius);
-                }
-            }
-        }
-    }
-    None
-}
+/// Tenta ler a faixa de frequência disponível do core 0.
+/// No Linux desktop scaling_available_frequencies pode não existir —
+/// nesse caso mostra min e max separadamente via cpuinfo_{min,max}_freq.
+fn ler_faixa_frequencia() -> String {
+    let base = "/sys/devices/system/cpu/cpu0/cpufreq";
 
-pub fn ler_governor() -> String {
-    std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
-        .unwrap_or_default()
-        .trim()
-        .to_string()
-}
-
-pub fn ler_frequencias_disponiveis() -> Vec<u64> {
-    std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies")
-        .unwrap_or_default()
+    // Opção 1: scaling_available_frequencies (Termux / alguns kernels)
+    let disponivel = std::fs::read_to_string(format!("{}/scaling_available_frequencies", base))
+        .unwrap_or_default();
+    let freqs: Vec<u64> = disponivel
         .split_whitespace()
         .filter_map(|s| s.parse::<u64>().ok())
         .map(|f| f / 1000)
-        .collect()
+        .collect();
+
+    if !freqs.is_empty() {
+        let min = freqs.iter().min().unwrap_or(&0);
+        let max = freqs.iter().max().unwrap_or(&0);
+        return format!("{} - {} MHz ({} níveis)", min, max, freqs.len());
+    }
+
+    // Opção 2: cpuinfo_min_freq + cpuinfo_max_freq (Linux desktop padrão)
+    let min_khz = std::fs::read_to_string(format!("{}/cpuinfo_min_freq", base))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|v| v / 1000);
+
+    let max_khz = std::fs::read_to_string(format!("{}/cpuinfo_max_freq", base))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|v| v / 1000);
+
+    match (min_khz, max_khz) {
+        (Some(min), Some(max)) => format!("{} - {} MHz", min, max),
+        (None, Some(max))      => format!("até {} MHz", max),
+        (Some(min), None)      => format!("a partir de {} MHz", min),
+        (None, None)           => "não disponível".to_string(),
+    }
 }
 
 pub fn render(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
@@ -49,17 +58,20 @@ pub fn render(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
 }
 
 fn render_info(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
-    let temperatura = ler_temperatura();
-    let governor = ler_governor();
-
-    let cor_temp = temperatura.map(|t| {
-        if t >= 70.0 { Color::Rgb(220, 50, 50) }
+    // Usa temperatura e governor já coletados pelo collector (linux.rs)
+    // evitando leituras duplicadas de /sys a cada frame
+    let cor_temp = metrics.temperatura.map(|t| {
+        if t >= 70.0      { Color::Rgb(220, 50, 50) }
         else if t >= 55.0 { Color::Rgb(220, 180, 0) }
-        else { Color::Rgb(0, 200, 80) }
+        else              { Color::Rgb(0, 200, 80) }
     }).unwrap_or(Color::DarkGray);
 
-    let temp_str = temperatura
+    let temp_str = metrics.temperatura
         .map(|t| format!("{:.1}°C", t))
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let governor_str = metrics.governor
+        .clone()
         .unwrap_or_else(|| "N/A".to_string());
 
     let pct_ram = if metrics.memoria.total > 0 {
@@ -85,15 +97,17 @@ fn render_info(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
         ]),
         Row::new(vec![
             Cell::from("CPU Governor").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Cell::from(governor).style(Style::default().fg(Color::White)),
+            Cell::from(governor_str).style(Style::default().fg(Color::White)),
         ]),
         Row::new(vec![
             Cell::from("CPU Cores").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{} cores", metrics.cpu.usage_por_core.len())).style(Style::default().fg(Color::White)),
+            Cell::from(format!("{} cores", metrics.cpu.usage_por_core.len()))
+                .style(Style::default().fg(Color::White)),
         ]),
         Row::new(vec![
             Cell::from("CPU Freq").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{} MHz", metrics.cpu.frequencia_mhz)).style(Style::default().fg(Color::White)),
+            Cell::from(format!("{} MHz", metrics.cpu.frequencia_mhz))
+                .style(Style::default().fg(Color::White)),
         ]),
         Row::new(vec![
             Cell::from("RAM Total").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -106,47 +120,43 @@ fn render_info(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
         ]),
         Row::new(vec![
             Cell::from("SWAP Total").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Cell::from(formatar_bytes(metrics.memoria.swap_total)).style(Style::default().fg(Color::White)),
+            Cell::from(
+                if metrics.memoria.swap_total == 0 {
+                    "sem swap".to_string()
+                } else {
+                    formatar_bytes(metrics.memoria.swap_total)
+                }
+            ).style(Style::default().fg(Color::White)),
         ]),
     ];
 
     let tabela = Table::new(rows, [Constraint::Length(14), Constraint::Min(20)])
         .block(Block::default().title(" ℹ️  Informações do Sistema ").borders(Borders::ALL));
-
     f.render_widget(tabela, area);
 }
 
 fn render_cpu_detail(f: &mut Frame, area: Rect, metrics: &SystemMetrics) {
-    let freqs = ler_frequencias_disponiveis();
-    let freq_str = if freqs.is_empty() {
-        "N/A".to_string()
-    } else {
-        format!("{} - {} MHz ({} níveis)",
-            freqs.iter().min().unwrap_or(&0),
-            freqs.iter().max().unwrap_or(&0),
-            freqs.len()
-        )
-    };
+    let freq_str = ler_faixa_frequencia();
+
+    let uso_cores = metrics.cpu.usage_por_core.iter().enumerate()
+        .map(|(i, u)| format!("C{}:{:.0}%", i, u))
+        .collect::<Vec<_>>()
+        .join("  ");
 
     let linhas = vec![
         Line::from(vec![
-            Span::styled(" Frequências disponíveis: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" Frequências disponíveis: ",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled(freq_str, Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled(" Uso por core: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                metrics.cpu.usage_por_core.iter().enumerate()
-                    .map(|(i, u)| format!("C{}:{:.0}%", i, u))
-                    .collect::<Vec<_>>()
-                    .join("  "),
-                Style::default().fg(Color::White)
-            ),
+            Span::styled(" Uso por core: ",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(uso_cores, Style::default().fg(Color::White)),
         ]),
     ];
 
     let paragrafo = Paragraph::new(linhas)
         .block(Block::default().title(" 🔧 Detalhes CPU ").borders(Borders::ALL));
-
     f.render_widget(paragrafo, area);
 }

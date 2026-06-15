@@ -8,12 +8,18 @@ use ratatui::{
 use crate::metrics::collector::CpuMetrics;
 
 pub fn render(f: &mut Frame, area: Rect, cpu: &CpuMetrics, historico: &[f32]) {
+    let n_cores = cpu.usage_por_core.len().max(1);
+    let barchart_height = (area.height / 2).max(12).min(area.height.saturating_sub(8));
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Length(barchart_height),
+            Constraint::Min(8),
+        ])
         .split(area);
 
-    render_barchart(f, chunks[0], cpu);
+    render_barchart(f, chunks[0], cpu, n_cores);
     render_historico(f, chunks[1], historico);
 }
 
@@ -27,7 +33,7 @@ pub fn render_gauge(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
     f.render_widget(gauge, area);
 }
 
-fn render_barchart(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
+fn render_barchart(f: &mut Frame, area: Rect, cpu: &CpuMetrics, _n_cores: usize) {
     let titulo = format!(
         " 🖥️  CPU — {} | {} MHz | {:.1}% ",
         cpu.nome, cpu.frequencia_mhz, cpu.usage_global
@@ -41,15 +47,22 @@ fn render_barchart(f: &mut Frame, area: Rect, cpu: &CpuMetrics) {
                 .value(*uso as u64)
                 .label(ratatui::text::Line::from(format!("C{}", i)))
                 .style(Style::default().fg(cor_por_uso(*uso)))
-                .value_style(Style::default().fg(Color::White))
+                .value_style(Style::default().fg(Color::White).bg(cor_por_uso(*uso)))
         })
         .collect();
 
     let grupo = BarGroup::default().bars(&barras);
+
+    let bar_w = {
+        let disponivel = area.width.saturating_sub(4); // bordas
+        let por_core = disponivel / (_n_cores.max(1) as u16);
+        por_core.saturating_sub(1).clamp(3, 8)
+    };
+
     let chart = BarChart::default()
         .block(Block::default().title(titulo).borders(Borders::ALL))
         .max(100)
-        .bar_width(3)
+        .bar_width(bar_w)
         .bar_gap(1)
         .data(grupo);
 
@@ -86,7 +99,11 @@ fn render_historico(f: &mut Frame, area: Rect, historico: &[f32]) {
             .style(Style::default().fg(Color::DarkGray)))
         .y_axis(Axis::default()
             .bounds([0.0, 100.0])
-            .labels(vec![ratatui::text::Span::raw("0%"), ratatui::text::Span::raw("50%"), ratatui::text::Span::raw("100%")])
+            .labels(vec![
+                ratatui::text::Span::raw("0%"),
+                ratatui::text::Span::raw("50%"),
+                ratatui::text::Span::raw("100%"),
+            ])
             .style(Style::default().fg(Color::DarkGray)));
 
     f.render_widget(chart, area);

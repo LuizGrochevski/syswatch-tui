@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Luiz Grochevski"]
 description = "Dashboard TUI de monitoramento de sistema em tempo real"
+default-run = "syswatch-tui"
 
 [dependencies]
 ratatui = "0.29"
@@ -15,6 +16,10 @@ anyhow = "1"
 [profile.release]
 opt-level = 3
 strip = true
+
+[[bin]]
+name = "syswatch-tui"
+path = "src/main.rs"
 
 [[bin]]
 name = "test_sysinfo"

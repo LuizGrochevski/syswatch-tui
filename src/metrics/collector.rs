@@ -1,4 +1,9 @@
 use crate::metrics::android::{ler_memoria, ler_cpus, ler_processos_self};
+use crate::metrics::linux::{
+    ler_cpus_linux, ler_processos_linux, ler_interfaces_linux,
+    ler_temperatura_linux, ler_governor_linux, detectar_os, is_termux,
+};
+use crate::metrics::network::{ler_interfaces, InterfaceInfo};
 
 #[derive(Clone, Debug)]
 pub struct CpuMetrics {
@@ -29,6 +34,9 @@ pub struct ProcessoInfo {
 #[derive(Clone, Debug)]
 pub struct NetworkMetrics {
     pub interface: String,
+    pub ip: Option<String>,
+    pub flags: Vec<String>,
+    pub mtu: Option<u32>,
     pub bytes_enviados: u64,
     pub bytes_recebidos: u64,
     pub pacotes_enviados: u64,
@@ -44,43 +52,101 @@ pub struct SystemMetrics {
     pub uptime_secs: u64,
     pub hostname: String,
     pub os_nome: String,
+    pub temperatura: Option<f32>,
+    pub governor: Option<String>,
 }
 
-pub struct MetricsCollector;
+pub struct MetricsCollector {
+    /// Cache do nome do OS — detectado uma vez e reutilizado.
+    os_nome: String,
+    /// true = estamos no Termux/Android; false = Linux nativo.
+    termux: bool,
+}
 
 impl MetricsCollector {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        let termux = is_termux();
+        let os_nome = detectar_os();
+        Self { os_nome, termux }
+    }
 
     pub fn coletar(&mut self) -> SystemMetrics {
-        let cpu_raw = ler_cpus();
+        // ── Memória (igual nos dois ambientes) ───────────────────────────────
         let mem_raw = ler_memoria();
-        let procs_raw = ler_processos_self();
-
-        let cpu = CpuMetrics {
-            usage_global: cpu_raw.uso_global,
-            usage_por_core: cpu_raw.cores.iter().map(|c| c.uso).collect(),
-            frequencia_mhz: cpu_raw.cores.first().map(|c| c.freq_mhz).unwrap_or(0),
-            nome: format!("{} cores", cpu_raw.cores.len()),
-        };
-
         let memoria = MemoryMetrics {
-            total: mem_raw.total_kb * 1024,
-            usado: mem_raw.usado_kb() * 1024,
-            livre: mem_raw.disponivel_kb * 1024,
+            total:      mem_raw.total_kb     * 1024,
+            usado:      mem_raw.usado_kb()   * 1024,
+            livre:      mem_raw.disponivel_kb * 1024,
             swap_total: mem_raw.swap_total_kb * 1024,
             swap_usado: mem_raw.swap_usado_kb() * 1024,
         };
 
-        let processos = procs_raw.iter().map(|(pid, nome, cpu, mem)| ProcessoInfo {
-            pid: *pid,
-            nome: nome.clone(),
-            cpu: *cpu,
+        // ── CPU ───────────────────────────────────────────────────────────────
+        let cpu = if self.termux {
+            // Android/Termux: proxy de frequência (sem acesso a /proc/stat útil)
+            let raw = ler_cpus();
+            CpuMetrics {
+                usage_global:    raw.uso_global,
+                usage_por_core:  raw.cores.iter().map(|c| c.uso).collect(),
+                frequencia_mhz:  raw.cores.first().map(|c| c.freq_mhz).unwrap_or(0),
+                nome:            format!("{} cores", raw.cores.len()),
+            }
+        } else {
+            // Linux nativo: delta real de /proc/stat (200 ms de janela)
+            let raw = ler_cpus_linux(200);
+            CpuMetrics {
+                usage_global:    raw.uso_global,
+                usage_por_core:  raw.cores.iter().map(|c| c.uso).collect(),
+                frequencia_mhz:  raw.cores.first().map(|c| c.freq_mhz).unwrap_or(0),
+                nome:            format!("{} cores", raw.cores.len()),
+            }
+        };
+
+        // ── Processos ─────────────────────────────────────────────────────────
+        let procs_raw = if self.termux {
+            ler_processos_self()
+        } else {
+            ler_processos_linux()
+        };
+
+        let processos = procs_raw.iter().map(|(pid, nome, cpu_pct, mem)| ProcessoInfo {
+            pid:        *pid,
+            nome:       nome.clone(),
+            cpu:        *cpu_pct,
             memoria_mb: *mem,
-            status: "".to_string(),
+            status:     String::new(),
         }).collect();
 
+        // ── Rede ─────────────────────────────────────────────────────────────
+        let redes = if self.termux {
+            // Android: ifconfig (como antes)
+            ler_interfaces().into_iter().map(|i: InterfaceInfo| NetworkMetrics {
+                interface:        i.nome,
+                ip:               i.ip,
+                flags:            i.flags,
+                mtu:              i.mtu,
+                bytes_enviados:   0,
+                bytes_recebidos:  0,
+                pacotes_enviados: 0,
+                pacotes_recebidos:0,
+            }).collect()
+        } else {
+            // Linux: /proc/net/dev — sem ifconfig
+            ler_interfaces_linux().into_iter().map(|i| NetworkMetrics {
+                interface:         i.nome,
+                ip:                i.ip,
+                flags:             i.flags,
+                mtu:               i.mtu,
+                bytes_enviados:    i.tx_bytes,
+                bytes_recebidos:   i.rx_bytes,
+                pacotes_enviados:  i.tx_packets,
+                pacotes_recebidos: i.rx_packets,
+            }).collect()
+        };
+
+        // ── Sysinfo ───────────────────────────────────────────────────────────
         let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname")
-            .unwrap_or_else(|_| "android".to_string())
+            .unwrap_or_else(|_| "linux".to_string())
             .trim()
             .to_string();
 
@@ -91,14 +157,19 @@ impl MetricsCollector {
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(0.0) as u64;
 
+        let temperatura = ler_temperatura_linux();
+        let governor    = ler_governor_linux();
+
         SystemMetrics {
             cpu,
             memoria,
             processos,
-            redes: vec![],
+            redes,
             uptime_secs,
             hostname,
-            os_nome: "Android (Termux)".to_string(),
+            os_nome: self.os_nome.clone(),
+            temperatura,
+            governor,
         }
     }
 }
@@ -120,8 +191,8 @@ pub fn formatar_bytes(bytes: u64) -> String {
 }
 
 pub fn formatar_uptime(secs: u64) -> String {
-    let dias = secs / 86400;
-    let horas = (secs % 86400) / 3600;
+    let dias    = secs / 86400;
+    let horas   = (secs % 86400) / 3600;
     let minutos = (secs % 3600) / 60;
     let segundos = secs % 60;
     if dias > 0 {
@@ -171,5 +242,17 @@ mod tests {
         let m = c.coletar();
         assert!(m.memoria.total > 0);
         assert!(!m.cpu.usage_por_core.is_empty());
+    }
+
+    #[test]
+    fn test_is_termux_detectavel() {
+        // Apenas verifica que a função não entra em panic
+        let _ = is_termux();
+    }
+
+    #[test]
+    fn test_detectar_os_nao_vazio() {
+        let os = detectar_os();
+        assert!(!os.is_empty());
     }
 }
