@@ -1,43 +1,54 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    text::{Line, Span},
     Frame,
 };
-use crate::metrics::collector::{NetworkMetrics, formatar_bytes};
+use crate::metrics::network::ler_interfaces;
 
-pub fn render(f: &mut Frame, area: Rect, redes: &[NetworkMetrics]) {
+pub fn render(f: &mut Frame, area: Rect) {
+    let interfaces = ler_interfaces();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0)])
+        .split(area);
+
     let header = Row::new(vec![
         Cell::from("Interface").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Cell::from("↑ Enviado").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Cell::from("↓ Recebido").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Cell::from("Pkts TX").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Cell::from("Pkts RX").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("IP").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Máscara").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("MTU").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Cell::from("Flags").style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
     ]).height(1).bottom_margin(1);
 
-    let rows: Vec<Row> = redes.iter().map(|r| {
+    let rows: Vec<Row> = interfaces.iter().map(|iface| {
+        let ativo = iface.flags.contains(&"UP".to_string()) && iface.flags.contains(&"RUNNING".to_string());
+        let cor = if ativo { Color::Rgb(0, 200, 80) } else { Color::DarkGray };
+        let loopback = iface.flags.contains(&"LOOPBACK".to_string());
+        let cor_nome = if loopback { Color::DarkGray } else { Color::Yellow };
+
         Row::new(vec![
-            Cell::from(r.interface.clone()).style(Style::default().fg(Color::Yellow)),
-            Cell::from(formatar_bytes(r.bytes_enviados)).style(Style::default().fg(Color::Green)),
-            Cell::from(formatar_bytes(r.bytes_recebidos)).style(Style::default().fg(Color::Blue)),
-            Cell::from(r.pacotes_enviados.to_string()),
-            Cell::from(r.pacotes_recebidos.to_string()),
+            Cell::from(iface.nome.clone()).style(Style::default().fg(cor_nome).add_modifier(Modifier::BOLD)),
+            Cell::from(iface.ip.clone().unwrap_or_else(|| "-".to_string())).style(Style::default().fg(cor)),
+            Cell::from(iface.mascara.clone().unwrap_or_else(|| "-".to_string())).style(Style::default().fg(Color::White)),
+            Cell::from(iface.mtu.map(|m| m.to_string()).unwrap_or_else(|| "-".to_string())).style(Style::default().fg(Color::White)),
+            Cell::from(iface.flags.join(", ")).style(Style::default().fg(Color::DarkGray)),
         ])
     }).collect();
 
     let tabela = Table::new(rows, [
-        Constraint::Min(12),
-        Constraint::Length(12),
-        Constraint::Length(12),
-        Constraint::Length(10),
-        Constraint::Length(10),
+        Constraint::Length(15),
+        Constraint::Length(16),
+        Constraint::Length(16),
+        Constraint::Length(7),
+        Constraint::Min(20),
     ])
     .header(header)
     .block(Block::default()
-        .title(" 🌐 Rede ")
+        .title(" 🌐 Interfaces de Rede ")
         .borders(Borders::ALL));
 
-    f.render_widget(tabela, area);
+    f.render_widget(tabela, chunks[0]);
 }
-
-use ratatui::layout::Constraint;
