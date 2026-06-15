@@ -120,10 +120,33 @@ pub fn ler_cpus() -> CpuAndroid {
     CpuAndroid { cores, uso_global }
 }
 
+fn ler_ticks_proc(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+    let partes: Vec<&str> = stat.split_whitespace().collect();
+    let utime: u64 = partes.get(13)?.parse().ok()?;
+    let stime: u64 = partes.get(14)?.parse().ok()?;
+    Some(utime + stime)
+}
+
+fn ler_uptime_ticks() -> u64 {
+    fs::read_to_string("/proc/uptime")
+        .unwrap_or_default()
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|s| (s * 100.0) as u64)
+        .unwrap_or(0)
+}
+
 pub fn ler_processos_self() -> Vec<(u32, String, f32, f64)> {
-    // No Android sem root só temos acesso aos nossos próprios processos
-    // Retorna info do processo atual via /proc/self
-    let mut procs = Vec::new();
+    use std::collections::HashMap;
+
+    // Primeira leitura
+    let mut ticks1: HashMap<u32, u64> = HashMap::new();
+    let uptime1 = ler_uptime_ticks();
+
+    let mut procs_info = Vec::new();
+
     if let Ok(dirs) = fs::read_dir("/proc") {
         for entry in dirs.flatten() {
             let nome = entry.file_name();
@@ -141,12 +164,33 @@ pub fn ler_processos_self() -> Vec<(u32, String, f32, f64)> {
                     .unwrap_or(0);
                 let mem_mb = paginas as f64 * 4096.0 / 1024.0 / 1024.0;
                 if !comm.is_empty() {
-                    procs.push((pid, comm, 0.0, mem_mb));
+                    if let Some(ticks) = ler_ticks_proc(pid) {
+                        ticks1.insert(pid, ticks);
+                    }
+                    procs_info.push((pid, comm, mem_mb));
                 }
             }
         }
     }
-    procs.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Pequena pausa para calcular diferença
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let uptime2 = ler_uptime_ticks();
+    let delta_uptime = (uptime2.saturating_sub(uptime1)) as f32;
+
+    let mut procs: Vec<(u32, String, f32, f64)> = procs_info.into_iter().map(|(pid, comm, mem)| {
+        let cpu = if delta_uptime > 0.0 {
+            if let Some(t1) = ticks1.get(&pid) {
+                if let Some(t2) = ler_ticks_proc(pid) {
+                    let delta = t2.saturating_sub(*t1) as f32;
+                    (delta / delta_uptime * 100.0).min(100.0)
+                } else { 0.0 }
+            } else { 0.0 }
+        } else { 0.0 };
+        (pid, comm, cpu, mem)
+    }).collect();
+
+    procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     procs.truncate(15);
     procs
 }
