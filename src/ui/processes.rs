@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
@@ -42,9 +42,6 @@ pub fn render(f: &mut Frame, area: Rect, processos: &[ProcessoInfo]) {
         .borders(Borders::ALL))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-    use ratatui::widgets::StatefulWidget;
     let mut state = TableState::default();
     f.render_stateful_widget(tabela, area, &mut state);
 }
-
-use ratatui::layout::Constraint;

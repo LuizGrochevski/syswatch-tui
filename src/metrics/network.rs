@@ -63,6 +63,7 @@ pub fn parsear_ifconfig(texto: &str) -> Vec<InterfaceInfo> {
     interfaces.into_iter().filter(|i| !i.nome.is_empty()).collect()
 }
 
+#[allow(dead_code)] // API de conveniência, disponível para uso futuro
 pub fn obter_ip_local() -> Option<String> {
     ler_interfaces()
         .into_iter()
@@ -106,3 +107,4 @@ mod tests {
         let _ = ler_interfaces();
     }
 }
+

@@ -8,6 +8,7 @@ pub struct CpuAndroid {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // id e max_freq_mhz reservados para uso futuro na UI
 pub struct CoreInfo {
     pub id: usize,
     pub freq_mhz: u64,
@@ -34,10 +35,12 @@ impl MemAndroid {
     pub fn swap_usado_kb(&self) -> u64 {
         self.swap_total_kb.saturating_sub(self.swap_livre_kb)
     }
+    #[allow(dead_code)] // API de conveniência, usada em testes e disponível para a UI
     pub fn pct_ram(&self) -> f32 {
         if self.total_kb == 0 { return 0.0; }
         (self.usado_kb() as f32 / self.total_kb as f32) * 100.0
     }
+    #[allow(dead_code)] // API de conveniência, usada em testes e disponível para a UI
     pub fn pct_swap(&self) -> f32 {
         if self.swap_total_kb == 0 { return 0.0; }
         (self.swap_usado_kb() as f32 / self.swap_total_kb as f32) * 100.0
@@ -233,3 +236,4 @@ mod tests {
         assert!(mem.usado_kb() <= mem.total_kb);
     }
 }
+

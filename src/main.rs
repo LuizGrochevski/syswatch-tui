@@ -188,7 +188,7 @@ fn desenhar(f: &mut ratatui::Frame, app: &App) {
             }
             1 => ui::memory::render(f, chunks[2], &m.memoria),
             2 => ui::processes::render(f, chunks[2], &m.processos),
-            3 => ui::network::render(f, chunks[2]),
+            3 => ui::network::render(f, chunks[2], &m.redes),
             4 => ui::sysinfo::render(f, chunks[2], &m),
             _ => {}
         }

@@ -17,6 +17,7 @@ pub struct CpuMetrics {
 pub struct MemoryMetrics {
     pub total: u64,
     pub usado: u64,
+    #[allow(dead_code)] // disponível para a UI; hoje calculamos % direto de total/usado
     pub livre: u64,
     pub swap_total: u64,
     pub swap_usado: u64,
@@ -32,6 +33,10 @@ pub struct ProcessoInfo {
 }
 
 #[derive(Clone, Debug)]
+// TODO: ui/network.rs ainda chama metrics::network::ler_interfaces() direto
+// em vez de consumir SystemMetrics.redes. Quando migrado, isso passa a usar
+// os dados reais coletados aqui (incluindo rx/tx do /proc/net/dev no Linux).
+#[allow(dead_code)]
 pub struct NetworkMetrics {
     pub interface: String,
     pub ip: Option<String>,
@@ -48,6 +53,7 @@ pub struct SystemMetrics {
     pub cpu: CpuMetrics,
     pub memoria: MemoryMetrics,
     pub processos: Vec<ProcessoInfo>,
+    #[allow(dead_code)] // ver TODO em NetworkMetrics acima
     pub redes: Vec<NetworkMetrics>,
     pub uptime_secs: u64,
     pub hostname: String,
@@ -256,3 +262,4 @@ mod tests {
         assert!(!os.is_empty());
     }
 }
+
